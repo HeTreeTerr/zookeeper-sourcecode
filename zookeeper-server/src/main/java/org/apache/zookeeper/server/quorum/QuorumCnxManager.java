@@ -519,6 +519,7 @@ public class QuorumCnxManager {
                     new BufferedInputStream(sock.getInputStream()));
 
             LOG.debug("Sync handling of connection request received from: {}", sock.getRemoteSocketAddress());
+            // 处理连接信息
             handleConnection(sock, din);
         } catch (IOException e) {
             LOG.error("Exception handling connection, addr: {}, closing server connection",
@@ -568,6 +569,7 @@ public class QuorumCnxManager {
         InetSocketAddress electionAddr = null;
 
         try {
+            // 读取发送选票的机器id
             protocolVersion = din.readLong();
             if (protocolVersion >= 0) { // this is a server id and not a protocol version
                 sid = protocolVersion;
@@ -600,6 +602,13 @@ public class QuorumCnxManager {
         // do authenticating learner
         authServer.authenticate(sock, din);
         //If wins the challenge, then close the new connection.
+        /*
+        closeSocket
+        如果发送选票的机器id小于当前机器则关闭连接，为了防止机器之间重复建
+        立socket连接（双全工），zk不允许id小的机器连接id大的机器
+        connectOne
+        当前机器主动发起socket连接到发送选票id较小的机器
+         */
         if (sid < self.getId()) {
             /*
              * This replica might still believe that the connection to sid is
@@ -622,11 +631,15 @@ public class QuorumCnxManager {
             } else {
                 connectOne(sid);
             }
-        } else if (sid == self.getId()) {
+        }
+        // 一般不可能发生（和集群配置有关）
+        else if (sid == self.getId()) {
             // we saw this case in ZOOKEEPER-2164
             LOG.warn("We got a connection request from a server with our own ID. "
                     + "This should be either a configuration error, or a bug.");
-        } else { // Otherwise start worker threads to receive data.
+        }
+        // 开启接受选票线程
+        else { // Otherwise start worker threads to receive data.
             SendWorker sw = new SendWorker(sock, sid);
             RecvWorker rw = new RecvWorker(sock, din, sid, sw);
             sw.setRecv(rw);
@@ -912,6 +925,7 @@ public class QuorumCnxManager {
                         LOG.info("Creating TLS-only quorum server socket");
                         ss = new UnifiedServerSocket(self.getX509Util(), false);
                     } else {
+                        // socket 通信（BIO）
                         ss = new ServerSocket();
                     }
 
@@ -928,9 +942,11 @@ public class QuorumCnxManager {
                     }
                     LOG.info("{} is accepting connections now, my election bind port: {}", QuorumCnxManager.this.mySid, addr.toString());
                     setName(addr.toString());
+                    // 绑定地址（127.0.0.1:30001）
                     ss.bind(addr);
                     while (!shutdown) {
                         try {
+                            //接受命令（线程阻塞等待）
                             client = ss.accept();
                             setSockOpts(client);
                             LOG.info("Received connection request from {}", client.getRemoteSocketAddress());
@@ -942,6 +958,7 @@ public class QuorumCnxManager {
                             if (quorumSaslAuthEnabled) {
                                 receiveConnectionAsync(client);
                             } else {
+                                // 接受连接
                                 receiveConnection(client);
                             }
                             numRetries = 0;

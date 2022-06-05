@@ -249,6 +249,12 @@ public class NettyServerCnxnFactory extends ServerCnxnFactory {
             }
         }
 
+        /**
+         * 客户端执行命令
+         * @param ctx
+         * @param msg
+         * @throws Exception
+         */
         @Override
         public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
             try {
@@ -380,6 +386,9 @@ public class NettyServerCnxnFactory extends ServerCnxnFactory {
         }
     }
 
+    /**
+     * NettyServerCnxnFactory 无参构造器
+     */
     NettyServerCnxnFactory() {
         x509Util = new ClientX509Util();
 
@@ -394,9 +403,10 @@ public class NettyServerCnxnFactory extends ServerCnxnFactory {
             }
         }
         this.shouldUsePortUnification = usePortUnification;
-
+        // 初始化 bossGroup
         EventLoopGroup bossGroup = NettyUtils.newNioOrEpollEventLoopGroup(
                 NettyUtils.getClientReachableLocalInetAddressCount());
+        // 初始化 workerGroup
         EventLoopGroup workerGroup = NettyUtils.newNioOrEpollEventLoopGroup();
         ServerBootstrap bootstrap = new ServerBootstrap()
                 .group(bossGroup, workerGroup)
@@ -415,6 +425,7 @@ public class NettyServerCnxnFactory extends ServerCnxnFactory {
                         } else if (shouldUsePortUnification) {
                             initSSL(pipeline, true);
                         }
+                        // 绑定业务处理 CnxnChannelHandler
                         pipeline.addLast("servercnxnfactory", channelHandler);
                     }
                 });
@@ -587,6 +598,7 @@ public class NettyServerCnxnFactory extends ServerCnxnFactory {
     
     @Override
     public void start() {
+        // 绑定端口启动
         LOG.info("binding to port {}", localAddress);
         parentChannel = bootstrap.bind(localAddress).syncUninterruptibly().channel();
         // Port changes after bind() if the original port was 0, update

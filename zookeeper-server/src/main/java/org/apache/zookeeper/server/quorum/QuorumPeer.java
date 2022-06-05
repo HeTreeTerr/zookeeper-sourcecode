@@ -883,8 +883,10 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
     public synchronized void start() {
         if (!getView().containsKey(myid)) {
             throw new RuntimeException("My id " + myid + " not in the peer list");
-         }
+        }
+        // 加载文件数据到内存
         loadDataBase();
+        // 启动 netty 服务
         startServerCnxnFactory();
         try {
             adminServer.start();
@@ -892,7 +894,9 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
             LOG.warn("Problem starting AdminServer", e);
             System.out.println(e);
         }
+        // 启动快速选举算法相关线程
         startLeaderElection();
+        // 启动集群选举 leader 线程
         super.start();
     }
 
@@ -968,6 +972,7 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
                 throw new RuntimeException(e);
             }
         }
+        // 创建选举算法
         this.electionAlg = createElectionAlgorithm(electionType);
     }
 
@@ -1061,7 +1066,7 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
         return new Observer(this, new ObserverZooKeeperServer(logFactory, this, this.zkDb));
     }
 
-    @SuppressWarnings("deprecation")
+//    @SuppressWarnings("deprecation")
     protected Election createElectionAlgorithm(int electionAlgorithm){
         Election le=null;
 
@@ -1077,15 +1082,19 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
             le = new AuthFastLeaderElection(this, true);
             break;
         case 3:
+            // 初始化选举数据管理器
             QuorumCnxManager qcm = createCnxnManager();
             QuorumCnxManager oldQcm = qcmRef.getAndSet(qcm);
             if (oldQcm != null) {
                 LOG.warn("Clobbering already-set QuorumCnxManager (restarting leader election?)");
                 oldQcm.halt();
             }
+
             QuorumCnxManager.Listener listener = qcm.listener;
             if(listener != null){
+                // 启动选举监听
                 listener.start();
+                // 启动快速选举相关线程
                 FastLeaderElection fle = new FastLeaderElection(this, qcm);
                 fle.start();
                 le = fle;
