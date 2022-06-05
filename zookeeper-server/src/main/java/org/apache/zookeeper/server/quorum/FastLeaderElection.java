@@ -224,6 +224,7 @@ public class FastLeaderElection implements Election {
                 while (!stop) {
                     // Sleeps on receive
                     try {
+                        // 从传输层接收队列里取出选票
                         response = manager.pollRecvQueue(3000, TimeUnit.MILLISECONDS);
                         if(response == null) continue;
 
@@ -387,15 +388,18 @@ public class FastLeaderElection implements Election {
 
                             /*
                              * If this server is looking, then send proposed leader
+                             * 如果 server is looking，表示还在选举中。发送选举提议
                              */
-
                             if(self.getPeerState() == QuorumPeer.ServerState.LOOKING){
+                                // 放入应用层接收队列
                                 recvqueue.offer(n);
 
                                 /*
                                  * Send a notification back if the peer that sent this
                                  * message is also looking and its logical clock is
                                  * lagging behind.
+                                 * 如果发送选票方是选举状态并且发选举周期小于自己，
+                                 * 则把PK出的选票回发给发送选票方
                                  */
                                 if((ackstate == QuorumPeer.ServerState.LOOKING)
                                         && (n.electionEpoch < logicalclock.get())){
@@ -415,8 +419,11 @@ public class FastLeaderElection implements Election {
                                 /*
                                  * If this server is not looking, but the one that sent the ack
                                  * is looking, then send back what it believes to be the leader.
+                                 * 本机不是选举状态，已经选出了leader。发送本机认为的主节点过去
                                  */
+                                // 获取本机当前选票，这个选票一般是 leader
                                 Vote current = self.getCurrentVote();
+                                // 如果发送选票方是选举状态，则把本机认为的leader选票回发给发送选票方
                                 if(ackstate == QuorumPeer.ServerState.LOOKING){
                                     if(LOG.isDebugEnabled()){
                                         LOG.debug("Sending new notification. My id ={} recipient={} zxid=0x{} leader={} config version = {}",
@@ -468,9 +475,10 @@ public class FastLeaderElection implements Election {
             public void run() {
                 while (!stop) {
                     try {
+                        // 从应用层发送队列里，取选票
                         ToSend m = sendqueue.poll(3000, TimeUnit.MILLISECONDS);
                         if(m == null) continue;
-
+                        // 处理取出的选票
                         process(m);
                     } catch (InterruptedException e) {
                         break;
@@ -508,13 +516,13 @@ public class FastLeaderElection implements Election {
          * @param manager   Connection manager
          */
         Messenger(QuorumCnxManager manager) {
-
+            // 定义发送选票线程
             this.ws = new WorkerSender(manager);
 
             this.wsThread = new Thread(this.ws,
                     "WorkerSender[myid=" + self.getId() + "]");
             this.wsThread.setDaemon(true);
-
+            // 定义接收选票线程
             this.wr = new WorkerReceiver(manager);
 
             this.wrThread = new Thread(this.wr,
@@ -526,7 +534,9 @@ public class FastLeaderElection implements Election {
          * Starts instances of WorkerSender and WorkerReceiver
          */
         void start(){
+            // 运行发送选票线程
             this.wsThread.start();
+            // 运行接收选票线程
             this.wrThread.start();
         }
 

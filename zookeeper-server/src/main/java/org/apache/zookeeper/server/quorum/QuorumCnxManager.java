@@ -640,7 +640,9 @@ public class QuorumCnxManager {
         }
         // 开启接受选票线程
         else { // Otherwise start worker threads to receive data.
+            // 给发送选票sid这台机器创建一个选票发送器
             SendWorker sw = new SendWorker(sock, sid);
+            // 选票接收器
             RecvWorker rw = new RecvWorker(sock, din, sid, sw);
             sw.setRecv(rw);
 
@@ -649,13 +651,14 @@ public class QuorumCnxManager {
             if (vsw != null) {
                 vsw.finish();
             }
-
+            // 将选票发送器与sid对应，放入map
             senderWorkerMap.put(sid, sw);
-
+            // 给发送选票sid机器初始化一个发送选票队列，放入map
             queueSendMap.putIfAbsent(sid,
                     new ArrayBlockingQueue<ByteBuffer>(SEND_CAPACITY));
-
+            // 启动选票发送器线程
             sw.start();
+            // 启动选票接受器线程
             rw.start();
         }
     }
@@ -667,6 +670,7 @@ public class QuorumCnxManager {
     public void toSend(Long sid, ByteBuffer b) {
         /*
          * If sending message to myself, then simply enqueue it (loopback).
+         * 如果选票接收器就是自己，则放入自己的接收队列里
          */
         if (this.mySid == sid) {
              b.position(0);
@@ -681,11 +685,13 @@ public class QuorumCnxManager {
              ArrayBlockingQueue<ByteBuffer> bq = new ArrayBlockingQueue<ByteBuffer>(
                 SEND_CAPACITY);
              ArrayBlockingQueue<ByteBuffer> oldq = queueSendMap.putIfAbsent(sid, bq);
+             // 放入传输层发送队列
              if (oldq != null) {
                  addToSendQueue(oldq, b);
              } else {
                  addToSendQueue(bq, b);
              }
+             // 与对方sid机器建立连接
              connectOne(sid);
 
         }
@@ -1154,6 +1160,7 @@ public class QuorumCnxManager {
 
                     ByteBuffer b = null;
                     try {
+                        // 取出发送选票队列
                         ArrayBlockingQueue<ByteBuffer> bq = queueSendMap
                                 .get(sid);
                         if (bq != null) {
@@ -1166,6 +1173,7 @@ public class QuorumCnxManager {
 
                         if(b != null){
                             lastMessageSent.put(sid, b);
+                            // 发送选票
                             send(b);
                         }
                     } catch (InterruptedException e) {
@@ -1252,6 +1260,7 @@ public class QuorumCnxManager {
                     byte[] msgArray = new byte[length];
                     din.readFully(msgArray, 0, length);
                     ByteBuffer message = ByteBuffer.wrap(msgArray);
+                    //将接收到的选票丢入 RecvQueue 中异步处理
                     addToRecvQueue(new Message(message.duplicate(), sid));
                 }
             } catch (Exception e) {
