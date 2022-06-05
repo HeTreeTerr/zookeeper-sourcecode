@@ -1176,11 +1176,12 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
 
         try {
             /*
-             * Main loop
+             * Main loop 主循环
+             * 根据当前节点状态，做对应业务处理
              */
             while (running) {
                 switch (getPeerState()) {
-                case LOOKING:
+                case LOOKING://选举状态
                     LOG.info("LOOKING");
 
                     if (Boolean.getBoolean("readonlymode.enabled")) {
@@ -1242,7 +1243,7 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
                         }                        
                     }
                     break;
-                case OBSERVING:
+                case OBSERVING://观察节点
                     try {
                         LOG.info("OBSERVING");
                         setObserver(makeObserver(logFactory));
@@ -1255,7 +1256,7 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
                        updateServerState();
                     }
                     break;
-                case FOLLOWING:
+                case FOLLOWING://从节点
                     try {
                        LOG.info("FOLLOWING");
                         setFollower(makeFollower(logFactory));
@@ -1268,7 +1269,7 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
                        updateServerState();
                     }
                     break;
-                case LEADING:
+                case LEADING://主节点
                     LOG.info("LEADING");
                     try {
                         setLeader(makeLeader(logFactory));
