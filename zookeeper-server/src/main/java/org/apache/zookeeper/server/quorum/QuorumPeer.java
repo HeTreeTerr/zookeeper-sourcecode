@@ -1263,9 +1263,12 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
                         follower.followLeader();
                     } catch (Exception e) {
                        LOG.warn("Unexpected exception",e);
-                    } finally {
+                    }
+                    // 如果 leader 挂了会出发异常执行 finally
+                    finally {
                        follower.shutdown();
                        setFollower(null);
+                       // 将自己的状态改为 LOOKINNG 进入下一轮while循环开始选举
                        updateServerState();
                     }
                     break;

@@ -243,6 +243,7 @@ public class Leader {
                     ss = new UnifiedServerSocket(self.getX509Util(), allowInsecureConnection);
                 }
             } else {
+                // 建立监听 follower 节点的 socket 连接
                 if (self.getQuorumListenOnAllIPs()) {
                     ss = new ServerSocket(self.getQuorumAddress().getPort());
                 } else {
@@ -400,6 +401,7 @@ public class Leader {
 
                         BufferedInputStream is = new BufferedInputStream(
                                 s.getInputStream());
+                        // 接收 follower 数据并开启线程处理
                         LearnerHandler fh = new LearnerHandler(s, is, Leader.this);
                         fh.start();
                     } catch (SocketException e) {
@@ -470,12 +472,14 @@ public class Leader {
 
         try {
             self.tick.set(0);
+            // 初始化 LeaderZookeeper 数据
             zk.loadData();
 
             leaderStateSummary = new StateSummary(self.getCurrentEpoch(), zk.getLastProcessedZxid());
 
             // Start thread that waits for connection requests from
             // new followers.
+            // 同步数据给从节点
             cnxAcceptor = new LearnerCnxAcceptor();
             cnxAcceptor.start();
 
@@ -564,7 +568,7 @@ public class Leader {
                  }
                  return;
              }
-
+             // 启动zk服务
              startZkServer();
              
             /**
@@ -654,6 +658,7 @@ public class Leader {
                     }
                     tickSkip = !tickSkip;
                 }
+                // leader 跟所有 follower 定时发送 ping 请求保持长连接
                 for (LearnerHandler f : getLearners()) {
                     f.ping();
                 }
