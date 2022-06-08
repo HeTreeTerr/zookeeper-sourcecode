@@ -1183,7 +1183,7 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
                 switch (getPeerState()) {
                 case LOOKING://选举状态
                     LOG.info("LOOKING");
-
+                    // 判断只读模式是否打开 是
                     if (Boolean.getBoolean("readonlymode.enabled")) {
                         LOG.info("Attempting to start ReadOnlyZooKeeperServer");
 
@@ -1229,13 +1229,17 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
                             roZkMgr.interrupt();
                             roZk.shutdown();
                         }
-                    } else {
+                    }
+                    // 判断只读模式是否打开 否
+                    else {
                         try {
                            reconfigFlagClear();
                             if (shuttingDownLE) {
                                shuttingDownLE = false;
+                               // 开始领导选举
                                startLeaderElection();
                                }
+                            // 设定当前选票
                             setCurrentVote(makeLEStrategy().lookForLeader());
                         } catch (Exception e) {
                             LOG.warn("Unexpected exception", e);
