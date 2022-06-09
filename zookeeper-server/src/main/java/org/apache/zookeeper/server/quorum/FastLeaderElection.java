@@ -699,6 +699,7 @@ public class FastLeaderElection implements Election {
                       " (n.round), " + sid + " (recipient), " + self.getId() +
                       " (myid), 0x" + Long.toHexString(proposedEpoch) + " (n.peerEpoch)");
             }
+            // 给所有其他参与选票的节点，发送选票到应用层发送队列
             sendqueue.offer(notmsg);
         }
     }
@@ -736,8 +737,8 @@ public class FastLeaderElection implements Election {
          * 2- New epoch is the same as current epoch, but new zxid is higher
          * 3- New epoch is the same as current epoch, new zxid is the same
          *  as current zxid, but server id is higher.
+         *  具体的选举 PK 逻辑
          */
-
         return ((newEpoch > curEpoch) ||
                 ((newEpoch == curEpoch) &&
                 ((newZxid > curZxid) || ((newZxid == curZxid) && (newId > curId)))));
@@ -764,6 +765,8 @@ public class FastLeaderElection implements Election {
         /*
          * First make the views consistent. Sometimes peers will have different
          * zxids for a server depending on timing.
+         * for 循环选票箱里收到的选票，与本机投的 Leader 选票对比
+         * 如果相等，将机器sid加入 voteSet
          */
         for (Map.Entry<Long, Vote> entry : votes.entrySet()) {
             if (vote.equals(entry.getValue())) {
@@ -906,18 +909,24 @@ public class FastLeaderElection implements Election {
             int notTimeout = finalizeWait;
 
             synchronized(this){
+                // 选举周期加1
                 logicalclock.incrementAndGet();
+                /*
+                初始化选票（自己）
+                getInitLastLoggedZxid() 选票里的最大zxid是从内存树里取的
+                 */
                 updateProposal(getInitId(), getInitLastLoggedZxid(), getPeerEpoch());
             }
 
             LOG.info("New election. My id =  " + self.getId() +
                     ", proposed zxid=0x" + Long.toHexString(proposedZxid));
+            // 发送选票选择自己
             sendNotifications();
 
             /*
              * Loop in which we exchange notifications until we find a leader
+             * 当前节点是选举状态，会不断选举
              */
-
             while ((self.getPeerState() == ServerState.LOOKING) &&
                     (!stop)){
                 /*
@@ -930,6 +939,7 @@ public class FastLeaderElection implements Election {
                 /*
                  * Sends more notifications if haven't received enough.
                  * Otherwise processes new notification.
+                 * 首次启动时，肯定是没有选票的，这时会跟需要选票的机器建立连接
                  */
                 if(n == null){
                     if(manager.haveDelivered()){
@@ -945,7 +955,8 @@ public class FastLeaderElection implements Election {
                     notTimeout = (tmpTimeOut < maxNotificationInterval?
                             tmpTimeOut : maxNotificationInterval);
                     LOG.info("Notification time out: " + notTimeout);
-                } 
+                }
+                // 处理新的选票通知
                 else if (validVoter(n.sid) && validVoter(n.leader)) {
                     /*
                      * Only proceed if the vote comes from a replica in the current or next
@@ -953,29 +964,57 @@ public class FastLeaderElection implements Election {
                      */
                     switch (n.state) {
                     case LOOKING:
+                        // 选举主线逻辑
                         // If notification > current, replace and send messages out
+                        /*
+                        接收的选票选举周期大于自己的选举周期
+                        这种情况可能是自己后启动加入集群选举，或者网络中断恢复后加入集群，
+                        其它机器已经选举过好几轮了，所以需要更新自己的选举周期到最新
+                         */
                         if (n.electionEpoch > logicalclock.get()) {
+                            // 更新自己的选举周期
                             logicalclock.set(n.electionEpoch);
+                            // 清空之前的选票箱
                             recvset.clear();
+                            /*
+                            选票PK
+                            因为自己的选举周期落后了，可能时刚加入集群选举，所以是拿收到的
+                            选票跟投给自己的选票做PK
+                             */
                             if(totalOrderPredicate(n.leader, n.zxid, n.peerEpoch,
                                     getInitId(), getInitLastLoggedZxid(), getPeerEpoch())) {
+                                // 接收的选票胜
                                 updateProposal(n.leader, n.zxid, n.peerEpoch);
                             } else {
+                                // 自己胜
                                 updateProposal(getInitId(),
                                         getInitLastLoggedZxid(),
                                         getPeerEpoch());
                             }
+                            // 发送选票
                             sendNotifications();
-                        } else if (n.electionEpoch < logicalclock.get()) {
+                        }
+                        /*
+                        接收的选票选举周期小于自己，意味者发选票的机器刚加入集群选举
+                        发起投他自己的选票，这种选票一般都要废弃掉
+                         */
+                        else if (n.electionEpoch < logicalclock.get()) {
                             if(LOG.isDebugEnabled()){
                                 LOG.debug("Notification election epoch is smaller than logicalclock. n.electionEpoch = 0x"
                                         + Long.toHexString(n.electionEpoch)
                                         + ", logicalclock=0x" + Long.toHexString(logicalclock.get()));
                             }
                             break;
-                        } else if (totalOrderPredicate(n.leader, n.zxid, n.peerEpoch,
+                        }
+                        /*
+                        接收的选票选举周期等于自己，意味着大家一直在参与选举，
+                        那么在选举PK时需要拿收到的选票跟之前我投的选票做PK
+                         */
+                        else if (totalOrderPredicate(n.leader, n.zxid, n.peerEpoch,
                                 proposedLeader, proposedZxid, proposedEpoch)) {
+                            // 如果接收到的选票胜
                             updateProposal(n.leader, n.zxid, n.peerEpoch);
+                            // 发送选票
                             sendNotifications();
                         }
 
@@ -987,13 +1026,19 @@ public class FastLeaderElection implements Election {
                         }
 
                         // don't care about the version if it's in LOOKING state
+                        // 将接收到的选票放入选票箱
                         recvset.put(n.sid, new Vote(n.leader, n.zxid, n.electionEpoch, n.peerEpoch));
 
+                        // 过半数选举 leader 逻辑
                         if (termPredicate(recvset,
                                 new Vote(proposedLeader, proposedZxid,
                                         logicalclock.get(), proposedEpoch))) {
 
                             // Verify if there is any change in the proposed leader
+                            /*
+                            在上一步选出 leader 之后，再看下是否还有新选票加入。
+                            如果有，还需要再做下选票PK，如果新选票获胜则需要重新选举
+                             */
                             while((n = recvqueue.poll(finalizeWait,
                                     TimeUnit.MILLISECONDS)) != null){
                                 if(totalOrderPredicate(n.leader, n.zxid, n.peerEpoch,
@@ -1008,12 +1053,17 @@ public class FastLeaderElection implements Election {
                              * relevant message from the reception queue
                              */
                             if (n == null) {
+                                /*
+                                如果本机的 leader 和本机 sid 一样，则自己就是leader，
+                                否则自己是 follower 或 observer
+                                 */
                                 self.setPeerState((proposedLeader == self.getId()) ?
                                         ServerState.LEADING: learningState());
                                 Vote endVote = new Vote(proposedLeader,
                                         proposedZxid, logicalclock.get(), 
                                         proposedEpoch);
                                 leaveInstance(endVote);
+
                                 return endVote;
                             }
                         }
@@ -1026,17 +1076,23 @@ public class FastLeaderElection implements Election {
                         /*
                          * Consider all notifications from the same epoch
                          * together.
+                         * 这种状态一般是已选出 leader 的集群，有新机器加入了，新机器处于
+                         * LOOKING 状态会先选主投票给自己，其它机器收到后会回发已选出的集
+                         * 群 LEADER 选票给新机器，这个选票的发送状态就是 FOLLOWING 或
+                         * LEADING
                          */
                         if(n.electionEpoch == logicalclock.get()){
                             recvset.put(n.sid, new Vote(n.leader, n.zxid, n.electionEpoch, n.peerEpoch));
                             if(termPredicate(recvset, new Vote(n.version, n.leader,
                                             n.zxid, n.electionEpoch, n.peerEpoch, n.state))
                                             && checkLeader(outofelection, n.leader, n.electionEpoch)) {
+                                // 设置本机状态
                                 self.setPeerState((n.leader == self.getId()) ?
                                         ServerState.LEADING: learningState());
                                 Vote endVote = new Vote(n.leader, 
                                         n.zxid, n.electionEpoch, n.peerEpoch);
                                 leaveInstance(endVote);
+                                // 返回选出的 leader 并设置到自己节点的 currentVote 属性里
                                 return endVote;
                             }
                         }
